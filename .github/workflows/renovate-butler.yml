@@ -1,0 +1,61 @@
+name: renovate-butler
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily, 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report decisions only (no merges, no fix PRs)"
+        type: boolean
+        default: true
+
+# One butler at a time: overlapping runs would race each other's merges.
+concurrency:
+  group: renovate-butler
+  cancel-in-progress: false
+
+# This workflow's own GITHUB_TOKEN only reads this repo. All work on the target
+# repos uses the BUTLER_GITHUB_TOKEN secret (a PAT), because the built-in token
+# cannot reach other repos and its pushes would not trigger their CI.
+permissions:
+  contents: read
+
+jobs:
+  butler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: renovate-butler
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v5
+        with:
+          working_directory: renovate-butler
+          install: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Git identity for fix commits
+        run: |
+          git config --global user.name "renovate-butler"
+          git config --global user.email "renovate-butler@users.noreply.github.com"
+
+      - name: Run butler
+        env:
+          GITHUB_TOKEN: ${{ secrets.BUTLER_GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          # Scheduled runs are live; manual runs default to dry-run.
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '--dry-run' || '' }}
+        run: uv run renovate-butler --config butler.yaml $DRY_RUN run
+
+      - name: Upload action log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: butler-log-${{ github.run_id }}
+          path: renovate-butler/butler.log.jsonl
+          if-no-files-found: ignore
