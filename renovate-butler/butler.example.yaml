@@ -1,0 +1,26 @@
+# Copy to butler.yaml and edit.
+repos:
+  - tanayseven/some-repo
+main_branch: main
+
+merge:
+  method: squash                 # merge | squash | rebase
+  authors: ["renovate[bot]", "app/renovate"]
+  min_confidence: high           # low | neutral | high | very high
+  allowed_update_types: [patch, minor]
+  skip_labels: [do-not-merge]
+
+fix:
+  model: anthropic/claude-sonnet-5.5   # OpenRouter model id; checked at startup
+  max_attempts: 3                      # fix attempts per red-main incident
+  max_tool_turns: 40
+  allow_local_checks: false            # true = model may run the workflow's run: steps locally
+  label: renovate-butler
+
+poll:
+  interval_s: 30
+  timeout_s: 3600
+  no_ci_grace_s: 300
+
+dry_run: false
+log_file: butler.log.jsonl

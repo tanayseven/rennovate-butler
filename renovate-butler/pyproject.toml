@@ -1,0 +1,32 @@
+[project]
+name = "renovate-butler"
+version = "0.1.0"
+description = "Merges green, high-confidence Renovate PRs and keeps main green"
+readme = "README.md"
+authors = [
+    { name = "Tanay PrabhuDesai", email = "contact@tanay.tech" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.5.1",
+    "openai>=3.55.0",
+    "pygithub>=2.10.0",
+    "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+renovate-butler = "renovate_butler.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.30,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
+
+[tool.ruff]
+line-length = 120

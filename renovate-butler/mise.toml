@@ -1,0 +1,19 @@
+[settings]
+# Re-verify provenance (cosign / SLSA / GitHub attestations) on every install
+# rather than trusting the recorded lockfile entry alone.
+locked_verify_provenance = true
+# Don't pick up a release until it has been public for a week.
+minimum_release_age = "7d"
+
+[tools]
+uv = "0.11.30"
+python = "3.12"
+
+[tasks.test]
+run = "uv run pytest"
+
+[tasks.lint]
+run = "uv run ruff check"
+
+[tasks.run]
+run = "uv run renovate-butler"
