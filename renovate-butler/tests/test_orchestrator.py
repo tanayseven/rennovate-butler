@@ -122,3 +122,24 @@ def test_main_timeout_stops(no_sleep):
     res = butler(forge, None, cfg(), no_sleep).process_repo("o/r")
     assert not res.main_green and "did not settle" in res.note
     assert forge.merged == []
+
+
+def test_bad_repo_is_reported_and_others_still_run(no_sleep):
+    forge = FakeForge([make_pr(1)])
+    orig = forge.branch_head
+
+    class NotFound(Exception):
+        status = 404
+
+    def branch_head(repo, branch):
+        if repo == "o/missing":
+            raise NotFound("Not Found")
+        return orig(repo, branch)
+
+    forge.branch_head = branch_head
+    c = cfg()
+    c.repos = ["o/missing", "o/r"]
+    results = butler(forge, None, c, no_sleep).run()
+    assert [r.main_green for r in results] == [False, True]
+    assert "not found" in results[0].note
+    assert forge.merged == [1]

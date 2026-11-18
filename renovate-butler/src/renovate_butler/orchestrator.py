@@ -19,6 +19,15 @@ MAX_LOG_CHARS = 40_000
 MAX_PATCH_CHARS = 20_000
 
 
+def describe_error(e: Exception) -> str:
+    status = getattr(e, "status", None)
+    if status == 404:
+        return "not found (check the owner/repo name and that your token can access it)"
+    if status in (401, 403):
+        return f"GitHub refused access ({status}); check token scopes / repo permissions"
+    return f"{type(e).__name__}: {e}"
+
+
 class EventLog:
     """Prints human-readable lines and appends structured events to a JSONL file."""
 
@@ -63,7 +72,15 @@ class Butler:
     # ------------------------------------------------------------------ top level
 
     def run(self) -> list[RepoResult]:
-        return [self.process_repo(repo) for repo in self.cfg.repos]
+        results = []
+        for repo in self.cfg.repos:
+            try:
+                results.append(self.process_repo(repo))
+            except Exception as e:  # noqa: BLE001 - one broken repo must not stop the others
+                note = describe_error(e)
+                self.log(f"  error: {note}", event="repo_error", repo=repo, error=repr(e))
+                results.append(RepoResult(repo, note=f"error: {note}"))
+        return results
 
     def process_repo(self, repo: str) -> RepoResult:
         res = RepoResult(repo)
