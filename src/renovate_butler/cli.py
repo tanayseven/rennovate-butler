@@ -7,6 +7,7 @@ import sys
 import click
 
 from . import config as config_mod
+from . import notifier as notifier_mod
 from . import scanner
 from .github_client import GitHubClient
 from .orchestrator import Butler, EventLog, RepoResult
@@ -32,6 +33,12 @@ def _fixer(cfg, token, log):
     )
     fx.check_model()
     return fx
+
+
+def _log_and_notifier(cfg):
+    notifier = notifier_mod.from_env(click.echo)
+    log = EventLog(cfg.log_file, click.echo, [notifier.on_event] if notifier else [])
+    return log, notifier
 
 
 def _summary(results: list[RepoResult]) -> int:
@@ -70,9 +77,16 @@ def scan(ctx: click.Context) -> None:
 def run(ctx: click.Context) -> None:
     """Merge confident green PRs one by one; heal main whenever it goes red."""
     cfg, token, gh = _setup(ctx.obj["config"], ctx.obj["dry_run"])
-    log = EventLog(cfg.log_file, click.echo)
-    fixer = None if cfg.dry_run else _fixer(cfg, token, click.echo)
-    results = Butler(gh, fixer, cfg, log).run()
+    log, notifier = _log_and_notifier(cfg)
+    try:
+        fixer = None if cfg.dry_run else _fixer(cfg, token, click.echo)
+        results = Butler(gh, fixer, cfg, log).run()
+    except Exception as e:
+        if notifier:
+            notifier.crashed(e)
+        raise
+    if notifier:
+        notifier.summary(results, cfg.dry_run)
     sys.exit(_summary(results))
 
 
@@ -82,7 +96,7 @@ def run(ctx: click.Context) -> None:
 def fix(ctx: click.Context, repo: str) -> None:
     """Run the heal loop on one repo without merging any Renovate PRs."""
     cfg, token, gh = _setup(ctx.obj["config"], ctx.obj["dry_run"])
-    log = EventLog(cfg.log_file, click.echo)
+    log, notifier = _log_and_notifier(cfg)
     fixer = None if cfg.dry_run else _fixer(cfg, token, click.echo)
     butler = Butler(gh, fixer, cfg, log)
     res = RepoResult(repo)
@@ -91,7 +105,14 @@ def fix(ctx: click.Context, repo: str) -> None:
     if state != "failing":
         click.echo(f"{repo} {cfg.main_branch} CI is {state}; nothing to fix.")
         return
-    res.main_green = butler.heal(repo, res)
+    try:
+        res.main_green = butler.heal(repo, res)
+    except Exception as e:
+        if notifier:
+            notifier.crashed(e)
+        raise
+    if notifier:
+        notifier.summary([res], cfg.dry_run)
     sys.exit(_summary([res]))
 
 

@@ -39,6 +39,15 @@ Confidence badges are images (the word is rendered into a PNG), so `confidence.p
 
 When `main` is red: collect the failing jobs' logs, the workflow YAML and the last commit's diff, then run a tool-use agent on a temporary clone. The agent has `list_dir`, `read_file`, `grep`, `apply_edit`, `write_file` and `finish`, all confined to the clone, plus `run_check` if `fix.allow_local_checks` is true (runs the workflow's own `run:` steps, minus any touching secrets, with secret-looking env vars stripped). The change is pushed to `butler/fix-main-<sha>-<ts>` and opened as a PR. If its CI fails, the next attempt continues on the same branch with the new logs. When green it is merged and `main` is watched again.
 
+## Discord
+
+Set `DISCORD_WEBHOOK_URL` (a channel webhook: Edit Channel → Integrations → Webhooks) and the butler posts:
+
+- a summary after every run (green when every repo's `main` is green, red otherwise);
+- live alerts when `main` goes red, a fix PR is opened or merged, the butler gives up, or the run crashes.
+
+Messages never ping anyone, and errors never print the webhook URL. Use `assets/logo.png` as the webhook's avatar. Unset, nothing is posted.
+
 ## Development
 
 ```sh

@@ -31,22 +31,37 @@ def describe_error(e: Exception) -> str:
 class EventLog:
     """Prints human-readable lines and appends structured events to a JSONL file."""
 
-    def __init__(self, path: str | None, echo: Callable[[str], None] = print):
+    def __init__(
+        self,
+        path: str | None,
+        echo: Callable[[str], None] = print,
+        listeners: list[Callable[[dict], None]] | None = None,
+    ):
         self.path = Path(path) if path else None
         self.echo = echo
+        self.listeners = listeners or []
 
     def __call__(self, msg: str, **event) -> None:
         self.echo(msg)
-        if self.path and event:
-            rec = {"ts": datetime.now(UTC).isoformat(), "msg": msg, **event}
+        if not event:
+            return
+        rec = {"ts": datetime.now(UTC).isoformat(), "msg": msg, **event}
+        if self.path:
             with self.path.open("a") as f:
                 f.write(json.dumps(rec, default=str) + "\n")
+        for listener in self.listeners:
+            try:
+                listener(rec)
+            except Exception as e:  # noqa: BLE001 - a notifier must never break the run
+                self.echo(f"  warning: event listener failed: {e}")
 
 
 @dataclass
 class RepoResult:
     repo: str
     merged: list[int] = field(default_factory=list)
+    would_merge: list[int] = field(default_factory=list)
+    skipped: int = 0
     fix_prs: list[int] = field(default_factory=list)
     main_green: bool = False
     note: str = ""
@@ -102,6 +117,7 @@ class Butler:
 
         verdicts = scanner.scan(self.forge, repo, self.cfg.merge, self.fetch)
         self.log(scanner.format_report(verdicts))
+        res.skipped = sum(not v.merge for v in verdicts)
 
         for v in verdicts:
             if not v.merge:
@@ -110,9 +126,11 @@ class Butler:
             pr = self.forge.get_pr(repo, v.pr.number)
             fresh = scanner.evaluate(pr, self.forge.ci_state(repo, pr.head_sha), self.cfg.merge, self.fetch)
             if not fresh.merge:
+                res.skipped += 1
                 self.log(f"  #{pr.number}: no longer mergeable ({fresh.reason})", event="skip", repo=repo, pr=pr.number)
                 continue
             if self.cfg.dry_run:
+                res.would_merge.append(pr.number)
                 self.log(f"  [dry-run] would merge #{pr.number} {pr.title}", event="dry_merge", repo=repo, pr=pr.number)
                 continue
             merge_sha = self.forge.merge(repo, pr.number, self.cfg.merge.method, pr.head_sha)
@@ -185,7 +203,13 @@ class Butler:
                     repo, branch, main, f"fix({main}): {result.summary}", body, [self.cfg.fix.label]
                 )
                 res.fix_prs.append(fix_pr.number)
-                self.log(f"  opened fix PR #{fix_pr.number} {fix_pr.url}", event="fix_pr", repo=repo, pr=fix_pr.number)
+                self.log(
+                    f"  opened fix PR #{fix_pr.number} {fix_pr.url}",
+                    event="fix_pr",
+                    repo=repo,
+                    pr=fix_pr.number,
+                    url=fix_pr.url,
+                )
             fix_pr = self._refresh_after_push(repo, fix_pr, target)
 
             outcome = self._wait(repo, fix_pr.head_sha)
@@ -220,7 +244,13 @@ class Butler:
             red_sha, fix_pr = merge_sha, None
 
         res.note = f"gave up after {self.cfg.fix.max_attempts} fix attempts"
-        self.log(f"  {res.note}", event="fix_gave_up", repo=repo)
+        self.log(
+            f"  {res.note}",
+            event="fix_gave_up",
+            repo=repo,
+            pr=fix_pr.number if fix_pr else None,
+            url=fix_pr.url if fix_pr else None,
+        )
         if fix_pr:
             self.forge.comment(
                 repo,

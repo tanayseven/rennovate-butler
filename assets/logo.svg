@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Renovate Butler">
+  <title>Renovate Butler</title>
+  <path d="M98 199 A168 168 0 0 1 401 172" fill="none" stroke="#34C77B" stroke-width="30" stroke-linecap="round"/>
+  <path d="M425 158 L377 186 L421 207 Z" fill="#34C77B" stroke="#34C77B" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M414 313 A168 168 0 0 1 110 340" fill="none" stroke="#34C77B" stroke-width="30" stroke-linecap="round"/>
+  <path d="M86 354 L134 326 L90 305 Z" fill="#34C77B" stroke="#34C77B" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M244 244 L170 204 L186 256 L170 308 L244 268 Z" fill="#F3EFE6" stroke="#16181D" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M268 244 L342 204 L326 256 L342 308 L268 268 Z" fill="#F3EFE6" stroke="#16181D" stroke-width="12" stroke-linejoin="round"/>
+  <rect x="234" y="232" width="44" height="48" rx="12" fill="#F3EFE6" stroke="#16181D" stroke-width="12"/>
+</svg>

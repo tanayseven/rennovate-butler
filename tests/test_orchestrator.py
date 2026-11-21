@@ -143,3 +143,10 @@ def test_bad_repo_is_reported_and_others_still_run(no_sleep):
     assert [r.main_green for r in results] == [False, True]
     assert "not found" in results[0].note
     assert forge.merged == [1]
+
+
+def test_result_counts_skipped_and_would_merge(no_sleep):
+    forge = FakeForge([make_pr(1), make_pr(2, draft=True)])
+    res = butler(forge, None, cfg(dry_run=True), no_sleep).process_repo("o/r")
+    assert res.would_merge == [1]
+    assert res.skipped == 1
