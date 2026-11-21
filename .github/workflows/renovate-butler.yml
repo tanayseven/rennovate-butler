@@ -25,15 +25,11 @@ jobs:
   butler:
     runs-on: ubuntu-latest
     timeout-minutes: 300
-    defaults:
-      run:
-        working-directory: renovate-butler
     steps:
       - uses: actions/checkout@v6
 
       - uses: jdx/mise-action@v5
         with:
-          working_directory: renovate-butler
           install: true
 
       - name: Install dependencies
@@ -57,5 +53,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: butler-log-${{ github.run_id }}
-          path: renovate-butler/butler.log.jsonl
+          path: butler.log.jsonl
           if-no-files-found: ignore
