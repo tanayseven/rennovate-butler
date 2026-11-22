@@ -8,7 +8,7 @@ main_branch: main
 merge:
   method: squash                 # merge | squash | rebase
   authors: ["renovate[bot]", "app/renovate"]
-  min_confidence: high           # low | neutral | high | very high
+  min_confidence: low            # low | neutral | high | very high (low = any PR with a badge; the heal loop covers breakage)
   allowed_update_types: [patch, minor]
   skip_labels: [do-not-merge]
 
