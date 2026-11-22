@@ -2,7 +2,7 @@ name: renovate-butler
 
 on:
   schedule:
-    - cron: "0 6 * * *" # daily, 06:00 UTC
+    - cron: "17 6 * * *" # daily, 06:17 UTC (off the hour: top-of-hour schedules get dropped)
   workflow_dispatch:
     inputs:
       dry_run:
