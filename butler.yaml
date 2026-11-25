@@ -3,6 +3,10 @@ repos:
   - tanayseven/subhashitani
   - tanayseven/crt-screen-home-page
   - tanayseven/my-projects
+  - tanayseven/tech-events-tracker
+  - tanayseven/diwali
+  - tanayseven/breakout-ebitengine
+  - tanayseven/blog.tanay.tech
 main_branch: main
 
 merge:
