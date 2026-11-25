@@ -22,6 +22,21 @@ uv run renovate-butler fix --repo owner/r   # only heal a red main
 
 Exit code is non-zero if any repo's `main` is not green at the end. Every action is appended to `butler.log.jsonl`.
 
+## Adding a repo
+
+1. Add the repo to the [Mend Renovate GitHub app](https://github.com/apps/renovate/installations/new) (pick your account, then add the repo under **Repository access**) and merge the onboarding PR Renovate opens there. The [Mend developer portal](https://developer.mend.io/) shows each repo's Renovate status and logs.
+2. Make sure the `BUTLER_GITHUB_TOKEN` PAT can reach the repo. A fine-grained PAT has to list it.
+3. Add it to `butler.yaml` with [`scripts/add_repo.py`](scripts/add_repo.py):
+
+   ```sh
+   uv run scripts/add_repo.py owner/repo [owner/other ...]   # branch + commit + PR
+   uv run scripts/add_repo.py owner/repo --no-pr             # only edit butler.yaml
+   ```
+
+   The PR's `renovate-butler` check runs the butler with `--dry-run` across every configured repo. It shows what would be merged, and it fails if the token can't reach a repo or any `main` is red.
+
+In Claude Code, the [`add-repo` skill](.claude/skills/add-repo/SKILL.md) does the same: it runs the script, waits for the dry run and summarises the result.
+
 ## How decisions are made
 
 A PR is merged only if **all** hold:
