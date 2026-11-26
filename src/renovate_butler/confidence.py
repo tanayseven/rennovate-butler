@@ -205,3 +205,47 @@ def parse(body: str, fetch: Callable[[str], str]) -> Confidence:
             )
         )
     return result
+
+
+SEMVER_ORDER = ["patch", "minor", "major"]
+CHANGE_RE = re.compile(r"`([^`]+)`\s*(?:→|->)\s*`([^`]+)`")
+
+
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def renovate_update_types(body: str) -> set[str]:
+    """Update types from the table Renovate puts at the top of every PR body.
+
+    Renovate writes it even when Mend has no Merge Confidence data, e.g.
+    ``| Package | Type | Update | Change |`` with rows like ``| uv | tools | minor | `0.11.11` → `0.13.10` |``,
+    or ``| Update | Change |`` / ``| lockFileMaintenance | All locks refreshed |``.
+
+    For major/minor/patch rows with parseable versions, the stricter of Renovate's label and
+    ``update_type()`` wins, so a 0.x minor bump counts as major here too. Other kinds
+    (lockFileMaintenance, digest, pin, ...) are returned as Renovate names them.
+    Returns an empty set when there is no such table.
+    """
+    lines = (body or "").splitlines()
+    for i, line in enumerate(lines):
+        header = _cells(line) if line.lstrip().startswith("|") else []
+        if "Update" not in header or "Change" not in header:
+            continue
+        u_col, c_col = header.index("Update"), header.index("Change")
+        types: set[str] = set()
+        for row in lines[i + 2 :]:  # skip the |---| separator
+            if not row.lstrip().startswith("|"):
+                break
+            cells = _cells(row)
+            if len(cells) <= max(u_col, c_col):
+                continue
+            kind = cells[u_col]
+            versions = CHANGE_RE.search(cells[c_col])
+            if kind in SEMVER_ORDER and versions:
+                ours = update_type(*versions.groups())
+                if ours in SEMVER_ORDER:
+                    kind = max(kind, ours, key=SEMVER_ORDER.index)
+            types.add(kind or "unknown")
+        return types
+    return set()

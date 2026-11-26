@@ -20,6 +20,10 @@ class MergeConfig:
     authors: list[str] = field(default_factory=lambda: ["renovate[bot]", "app/renovate"])
     min_confidence: str = "high"
     allowed_update_types: list[str] = field(default_factory=lambda: ["patch", "minor"])
+    # Renovate PRs with no Merge Confidence badge (GitHub Actions, mise tools, Docker,
+    # lock-file refreshes) are judged by the update type in Renovate's PR table instead.
+    # Empty = never merge badge-less PRs.
+    badgeless_update_types: list[str] = field(default_factory=list)
     skip_labels: list[str] = field(default_factory=lambda: ["do-not-merge"])
 
 

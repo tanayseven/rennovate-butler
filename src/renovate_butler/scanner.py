@@ -54,12 +54,22 @@ def evaluate(
     c = conf.parse(pr.body, fetch)
     level, types = c.level, c.update_types
     if not c.updates:
-        return v(False, "no Merge Confidence badges in PR body")
-    if not conf.meets(level, cfg.min_confidence):
-        return v(False, f"confidence {level} < {cfg.min_confidence}", level, types)
-    bad = types - set(cfg.allowed_update_types)
-    if bad:
-        return v(False, f"update type {sorted(bad)} not allowed", level, types)
+        # No badge: Mend has no confidence data for this kind of update. Fall back to
+        # Renovate's own update type, if the config allows any badge-less types.
+        if not cfg.badgeless_update_types:
+            return v(False, "no Merge Confidence badges in PR body")
+        level, types = "none", conf.renovate_update_types(pr.body)
+        if not types:
+            return v(False, "no Merge Confidence badges or Renovate update table", level)
+        bad = types - set(cfg.badgeless_update_types)
+        if bad:
+            return v(False, f"no badge; update type {sorted(bad)} not allowed without one", level, types)
+    else:
+        if not conf.meets(level, cfg.min_confidence):
+            return v(False, f"confidence {level} < {cfg.min_confidence}", level, types)
+        bad = types - set(cfg.allowed_update_types)
+        if bad:
+            return v(False, f"update type {sorted(bad)} not allowed", level, types)
     if pr.mergeable is None or pr.mergeable_state in ("unknown", "blocked", "behind"):
         # GitHub hasn't computed mergeability, or branch protection blocks it.
         return v(False, f"mergeable_state={pr.mergeable_state}", level, types)
