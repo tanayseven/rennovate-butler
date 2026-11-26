@@ -144,6 +144,15 @@ class Butler:
                 confidence=fresh.confidence,
             )
             outcome = self._wait(repo, merge_sha)
+            self.log(
+                f"  {main} CI after #{pr.number}: {outcome}",
+                event="merge_ci",
+                repo=repo,
+                pr=pr.number,
+                sha=merge_sha,
+                outcome=outcome,
+                title=pr.title,
+            )
             if outcome == "timeout":
                 res.note = f"main CI did not settle after merging #{pr.number}; stopping"
                 self.log(f"  {res.note}", event="main_timeout", repo=repo, sha=merge_sha)

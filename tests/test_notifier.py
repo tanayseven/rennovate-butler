@@ -43,9 +43,29 @@ def test_long_summary_is_truncated():
     assert len(desc) <= n.MAX_DESCRIPTION
 
 
+def test_merge_ci_alert_per_outcome():
+    ev = {"event": "merge_ci", "repo": "o/a", "pr": 5, "title": "update lodash to 4.17.21"}
+    passed = n.event_payload({**ev, "outcome": "green"}, link="https://gh/run/1")["embeds"][0]
+    assert passed["title"] == "Merged: main CI passed" and passed["color"] == n.GREEN
+    assert passed["description"] == (
+        "[a](https://github.com/o/a): merged [#5](https://github.com/o/a/pull/5) update lodash to 4.17.21\n"
+        "✅ CI on main passed.\n[View run](https://gh/run/1)"
+    )
+    failed = n.event_payload({**ev, "outcome": "red"})["embeds"][0]
+    assert failed["title"] == "Merged: main CI failed" and failed["color"] == n.RED
+    assert "Trying to fix it" in failed["description"]
+    assert n.event_payload({**ev, "outcome": "no-ci"})["embeds"][0]["color"] == n.AMBER
+    assert n.event_payload({**ev, "outcome": "timeout"})["embeds"][0]["color"] == n.AMBER
+    assert n.event_payload({**ev, "outcome": "weird"}) is None
+
+
 def test_event_payloads():
-    red = n.event_payload({"event": "main_red", "repo": "o/a", "pr": 5})
-    assert red["embeds"][0]["color"] == n.RED and "after merging [#5]" in red["embeds"][0]["description"]
+    red = n.event_payload({"event": "main_red", "repo": "o/a", "pr": None})
+    assert (
+        red["embeds"][0]["color"] == n.RED and "main is failing. Trying to fix it." in red["embeds"][0]["description"]
+    )
+    # Red after a Renovate merge is covered by that merge's merge_ci alert; don't post it twice.
+    assert n.event_payload({"event": "main_red", "repo": "o/a", "pr": 5}) is None
     opened = n.event_payload({"event": "fix_pr", "repo": "o/a", "pr": 901})
     assert opened["embeds"][0]["title"] == "Fix PR opened"
     gave_up = n.event_payload(

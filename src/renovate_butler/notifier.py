@@ -1,7 +1,8 @@
 """Post butler activity to a Discord channel through a webhook.
 
 Two kinds of message:
-- live alerts while the run is going (main went red, fix PR opened/merged, gave up);
+- live alerts while the run is going: each Renovate PR merged, with whether CI on
+  main then passed or failed; main already red; fix PR opened/merged; gave up;
 - one summary at the end of every run.
 
 The webhook URL contains a secret token, so it is never printed: errors are
@@ -28,6 +29,14 @@ RED = 0xE5484D
 USERNAME = "Renovate Butler"
 MAX_DESCRIPTION = 4000
 MAX_NOTE = 200
+
+# CI outcome on main after merging a Renovate PR -> (alert title, result line, colour).
+MERGE_OUTCOMES = {
+    "green": ("Merged: main CI passed", "✅ CI on main passed.", GREEN),
+    "red": ("Merged: main CI failed", "❌ CI on main failed. Trying to fix it.", RED),
+    "no-ci": ("Merged: no CI on main", "⚪ No CI ran on main, so there is nothing to check.", AMBER),
+    "timeout": ("Merged: main CI didn't finish", "⏳ CI on main didn't finish in time. Stopped merging here.", AMBER),
+}
 
 
 def _pr_link(repo: str, number: int) -> str:
@@ -94,9 +103,17 @@ def event_payload(event: dict, link: str | None = None) -> dict | None:
     kind, repo = event.get("event"), event.get("repo", "")
     pr = event.get("pr")
     pr_ref = _pr_link(repo, pr) if pr else ""
-    if kind == "main_red":
-        cause = f" after merging {pr_ref}" if pr else ""
-        title, desc, color = "main went red", f"{_repo_link(repo)}: main is failing{cause}. Trying to fix it.", RED
+    if kind == "merge_ci":
+        outcome = event.get("outcome")
+        what = f"{_repo_link(repo)}: merged {pr_ref} {event.get('title', '')}".rstrip()
+        if outcome not in MERGE_OUTCOMES:
+            return None
+        title, result, color = MERGE_OUTCOMES[outcome]
+        desc = f"{what}\n{result}"
+    elif kind == "main_red":
+        if pr:
+            return None  # red after a Renovate merge: already reported by that PR's merge_ci alert
+        title, desc, color = "main went red", f"{_repo_link(repo)}: main is failing. Trying to fix it.", RED
     elif kind == "fix_pr":
         title, desc, color = "Fix PR opened", f"{_repo_link(repo)}: opened {pr_ref} to fix main.", AMBER
     elif kind == "fix_merged":

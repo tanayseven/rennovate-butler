@@ -150,3 +150,23 @@ def test_result_counts_skipped_and_would_merge(no_sleep):
     res = butler(forge, None, cfg(dry_run=True), no_sleep).process_repo("o/r")
     assert res.would_merge == [1]
     assert res.skipped == 1
+
+
+def test_logs_main_ci_outcome_after_each_merge(no_sleep):
+    forge = FakeForge([make_pr(1), make_pr(2)])
+    forge.set_ci("merge2", "pending", "failing")  # main goes red after PR 2
+    forge.open_pr = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no fix PR expected"))
+    events = []
+    sleep, now = no_sleep
+    b = Butler(
+        forge,
+        FakeFixer(forge, changed=False),
+        cfg(),
+        log=lambda m, **e: events.append(e),
+        sleep=sleep,
+        now=now,
+        fetch=FETCH,
+    )
+    b.process_repo("o/r")
+    merge_ci = [(e["pr"], e["outcome"], e["title"]) for e in events if e.get("event") == "merge_ci"]
+    assert merge_ci == [(1, "green", "update dep 1"), (2, "red", "update dep 2")]

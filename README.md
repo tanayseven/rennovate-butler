@@ -59,7 +59,8 @@ When `main` is red: collect the failing jobs' logs, the workflow YAML and the la
 Set `DISCORD_WEBHOOK_URL` (a channel webhook: Edit Channel → Integrations → Webhooks) and the butler posts:
 
 - a summary after every run (green when every repo's `main` is green, red otherwise);
-- live alerts when `main` goes red, a fix PR is opened or merged, the butler gives up, or the run crashes.
+- one alert per merged Renovate PR, once CI on `main` has run on the merge: passed ✅, failed ❌ (the fix loop starts), no CI, or didn't finish in time;
+- live alerts when `main` is already red at the start, a fix PR is opened or merged, the butler gives up, or the run crashes.
 
 Messages never ping anyone, and errors never print the webhook URL. Use `assets/logo.png` as the webhook's avatar. Unset, nothing is posted.
 
