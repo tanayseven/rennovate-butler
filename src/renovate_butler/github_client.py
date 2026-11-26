@@ -7,6 +7,7 @@ Everything above this module (scanner, watcher, orchestrator) talks to the
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal, Protocol
@@ -17,6 +18,11 @@ from github import Auth, Github, GithubException
 CIState = Literal["passing", "failing", "pending", "none"]
 
 FAILED_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"}
+# Workflow runs not caused by code landing on the commit: scheduled jobs, manual runs, API
+# dispatches and GitHub's own dependency-graph runs. They share the commit's SHA, but a failing
+# nightly data job (or a third party blocking it) says nothing about whether the code is broken,
+# and the fixer can't repair it. So they never count towards a commit's CI state.
+IGNORED_EVENTS = frozenset({"schedule", "workflow_dispatch", "repository_dispatch", "dynamic"})
 LOG_TAIL_LINES = 400
 
 
@@ -45,6 +51,23 @@ class FailedRun:
     name: str
     url: str
     workflow_path: str
+
+
+def ignored_suites(workflow_runs: Iterable) -> set[int]:
+    """Check-suite ids of the workflow runs whose trigger is in IGNORED_EVENTS."""
+    return {run.check_suite_id for run in workflow_runs if run.event in IGNORED_EVENTS}
+
+
+def latest_check_runs(check_runs: Iterable, ignored: set[int]) -> list:
+    """The latest check run per name (re-runs supersede), minus runs from ignored check suites."""
+    latest: dict[str, object] = {}
+    for cr in check_runs:
+        if cr.check_suite_id in ignored:
+            continue
+        prev = latest.get(cr.name)
+        if prev is None or (cr.started_at and prev.started_at and cr.started_at > prev.started_at):
+            latest[cr.name] = cr
+    return list(latest.values())
 
 
 class Forge(Protocol):
@@ -114,16 +137,12 @@ class GitHubClient:
         return self._to_info(repo, pr)
 
     def ci_state(self, repo: str, sha: str) -> CIState:
-        commit = self._repo(repo).get_commit(sha)
+        r = self._repo(repo)
+        commit = r.get_commit(sha)
+        ignored = ignored_suites(r.get_workflow_runs(head_sha=sha))
         seen_any = False
         pending = False
-        # Only the latest check run per name counts (re-runs supersede).
-        latest: dict[str, object] = {}
-        for cr in commit.get_check_runs():
-            prev = latest.get(cr.name)
-            if prev is None or (cr.started_at and prev.started_at and cr.started_at > prev.started_at):
-                latest[cr.name] = cr
-        for cr in latest.values():
+        for cr in latest_check_runs(commit.get_check_runs(), ignored):
             seen_any = True
             if cr.status != "completed":
                 pending = True
@@ -153,6 +172,8 @@ class GitHubClient:
     def failed_runs(self, repo: str, sha: str) -> list[FailedRun]:
         out = []
         for run in self._repo(repo).get_workflow_runs(head_sha=sha):
+            if run.event in IGNORED_EVENTS:
+                continue
             if run.status == "completed" and run.conclusion in FAILED_CONCLUSIONS:
                 out.append(FailedRun(run.id, run.name or "", run.html_url, run.path or ""))
         return out
