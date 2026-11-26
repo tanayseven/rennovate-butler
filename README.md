@@ -46,7 +46,7 @@ A PR is merged only if **all** hold:
 - every update's semver bump (from the badge's from/to versions; 0.x minor counts as major) is in `allowed_update_types`;
 - GitHub reports it mergeable (`clean`/`unstable`/`has_hooks`).
 
-PRs with no confidence badges (e.g. GitHub Actions, Docker, lock file maintenance) are skipped.
+Mend only publishes Merge Confidence for package registries, so PRs for GitHub Actions, tools in `mise.toml`, Docker images and lock file maintenance carry no badge. For those, the butler reads the update type from the table Renovate puts at the top of the PR (`| Package | Type | Update | Change |`) and merges only if it is in `merge.badgeless_update_types` (here: patch, minor and `lockFileMaintenance`). A 0.x minor bump still counts as major. Every other rule above, green CI included, still applies. With `badgeless_update_types: []`, badge-less PRs are skipped.
 
 Confidence badges are images (the word is rendered into a PNG), so `confidence.py` decodes the PNG and classifies by background colour (red=low, grey=neutral, green=high) and badge width (very high is wider).
 

@@ -50,3 +50,48 @@ def test_scan_classifies_each_pr():
     ]
     report = format_report(vs)
     assert "MERGE" in report and "skip: CI failing" in report
+
+
+# ── PRs without a Merge Confidence badge ─────────────────────────────────────
+
+ACTION_MAJOR = (
+    "This PR contains the following updates:\n\n| Package | Type | Update | Change |\n|---|---|---|---|\n"
+    "| [actions/checkout](https://redirect.github.com/actions/checkout) | action | major | `v6` → `v7` |\n\n---\n"
+)
+NODE_PATCH = ACTION_MAJOR.replace("actions/checkout", "node").replace(
+    "action | major | `v6` → `v7`", "tools | patch | `24.22.0` → `24.22.3`"
+)
+UV_ZERO_MINOR = NODE_PATCH.replace("patch | `24.22.0` → `24.22.3`", "minor | `0.11.11` → `0.13.10`")
+LOCK_FILES = (
+    "| Update | Change |\n|---|---|\n| lockFileMaintenance | All locks refreshed |\n\n🔧 This PR updates lock files"
+)
+BADGELESS = MergeConfig(authors=["renovate[bot]"], badgeless_update_types=["patch", "minor", "lockFileMaintenance"])
+
+
+@pytest.mark.parametrize("body", [NODE_PATCH, LOCK_FILES])
+def test_badgeless_allowed_types_merge(body):
+    v = evaluate(make_pr(1, body=body), "passing", BADGELESS, HIGH)
+    assert v.merge and v.confidence == "none", v.reason
+
+
+@pytest.mark.parametrize(
+    "body, reason",
+    [
+        (ACTION_MAJOR, "no badge; update type ['major'] not allowed without one"),
+        (UV_ZERO_MINOR, "no badge; update type ['major']"),  # 0.x minor counts as major
+        ("no table at all", "no Merge Confidence badges or Renovate update table"),
+    ],
+)
+def test_badgeless_skips(body, reason):
+    v = evaluate(make_pr(1, body=body), "passing", BADGELESS, HIGH)
+    assert not v.merge and reason in v.reason
+
+
+def test_badgeless_off_by_default_and_ci_still_required():
+    assert "no Merge Confidence" in evaluate(make_pr(1, body=NODE_PATCH), "passing", CFG, HIGH).reason
+    assert evaluate(make_pr(1, body=NODE_PATCH), "none", BADGELESS, HIGH).reason == "CI none"
+
+
+def test_badged_prs_still_use_confidence_rules():
+    v = evaluate(make_pr(1, body=body_for("left-pad", "1.1.3", "1.1.4")), "passing", BADGELESS, HIGH)
+    assert not v.merge and "confidence neutral < high" in v.reason
