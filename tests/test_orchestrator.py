@@ -170,3 +170,32 @@ def test_logs_main_ci_outcome_after_each_merge(no_sleep):
     b.process_repo("o/r")
     merge_ci = [(e["pr"], e["outcome"], e["title"]) for e in events if e.get("event") == "merge_ci"]
     assert merge_ci == [(1, "green", "update dep 1"), (2, "red", "update dep 2")]
+
+
+def test_fix_usage_accumulates_per_incident_and_is_attributed_to_the_merge(no_sleep):
+    from renovate_butler.fixer import Usage
+
+    forge = FakeForge([make_pr(1)])
+    forge.ci_state = lambda repo, sha: "failing" if ("@" in sha or sha == "merge1") else "passing"
+    fixer = FakeFixer(forge)
+    orig_fix = fixer.fix
+
+    def fix(*a, **k):
+        r = orig_fix(*a, **k)
+        r.usage = Usage(calls=5, input_tokens=10_000, output_tokens=500, cost_usd=0.04)
+        return r
+
+    fixer.fix = fix
+    events = []
+    sleep, now = no_sleep
+    c = cfg()
+    c.fix.max_attempts = 2
+    b = Butler(forge, fixer, c, log=lambda m, **e: events.append(e), sleep=sleep, now=now, fetch=FETCH)
+    res = b.process_repo("o/r")
+
+    by_kind = {e["event"]: e for e in events if e.get("event")}
+    assert by_kind["fix_pr"]["cost_usd"] == 0.04 and by_kind["fix_pr"]["cause_pr"] == 1
+    gave_up = by_kind["fix_gave_up"]
+    assert (gave_up["llm_calls"], gave_up["input_tokens"], gave_up["output_tokens"]) == (10, 20_000, 1_000)
+    assert gave_up["cost_usd"] == 0.08
+    assert (res.usage.calls, round(res.usage.cost_usd, 2)) == (10, 0.08)

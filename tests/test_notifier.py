@@ -19,7 +19,10 @@ def test_summary_all_green_live_run():
     assert e["color"] == n.GREEN
     assert "merged [#2](https://github.com/o/a/pull/2), [#5](https://github.com/o/a/pull/5)" in e["description"]
     assert "nothing to merge (3 skipped)" in e["description"]
-    assert "2 merged · 0 fix PRs · [View run](https://gh/run/1)" in e["description"]
+    assert (
+        "2 merged · 0 fix PRs · model use: 0 tokens (0 in, 0 out) · $0.00 · [View run](https://gh/run/1)"
+        in e["description"]
+    )
     assert p["allowed_mentions"] == {"parse": []}
 
 
@@ -49,7 +52,7 @@ def test_merge_ci_alert_per_outcome():
     assert passed["title"] == "Merged: main CI passed" and passed["color"] == n.GREEN
     assert passed["description"] == (
         "[a](https://github.com/o/a): merged [#5](https://github.com/o/a/pull/5) update lodash to 4.17.21\n"
-        "✅ CI on main passed.\n[View run](https://gh/run/1)"
+        "✅ CI on main passed.\n🪙 0 tokens · $0.00 (merging doesn't use the model)\n[View run](https://gh/run/1)"
     )
     failed = n.event_payload({**ev, "outcome": "red"})["embeds"][0]
     assert failed["title"] == "Merged: main CI failed" and failed["color"] == n.RED
@@ -131,3 +134,30 @@ def test_event_log_feeds_listeners_and_survives_their_errors(tmp_path):
     log("  opened fix PR", event="fix_pr", repo="o/a", pr=9)
     assert [e["event"] for e in seen] == ["fix_pr"]
     assert any("listener failed" in line for line in echoed)
+
+
+def test_fix_alerts_show_tokens_cost_and_cause():
+    usage = {"llm_calls": 14, "input_tokens": 182_340, "output_tokens": 6_120, "cost_usd": 0.6388, "cause_pr": 5}
+    merged = n.event_payload({"event": "fix_merged", "repo": "o/a", "pr": 901, **usage})["embeds"][0]
+    assert (
+        "🪙 188,460 tokens (182,340 in, 6,120 out) · $0.64 over 14 model calls"
+        " · fixing the break from [#5](https://github.com/o/a/pull/5)"
+    ) in merged["description"]
+    gave_up = n.event_payload(
+        {"event": "fix_gave_up", "repo": "o/a", "msg": "gave up", "pr": None, **usage, "cause_pr": None}
+    )["embeds"][0]
+    assert "$0.64 over 14 model calls" in gave_up["description"] and "fixing the break" not in gave_up["description"]
+    # Events from before usage tracking (no fields) still render, just without the cost line.
+    assert "🪙" not in n.event_payload({"event": "fix_pr", "repo": "o/a", "pr": 901})["embeds"][0]["description"]
+
+
+def test_summary_shows_fix_cost_per_repo_and_total():
+    from renovate_butler.fixer import Usage
+
+    results = [
+        RepoResult("o/a", merged=[2], fix_prs=[901], main_green=True, usage=Usage(9, 100_000, 4_000, 0.36)),
+        RepoResult("o/b", merged=[3], main_green=True, usage=Usage(3, 20_000, 1_000, 0.07)),
+    ]
+    desc = n.summary_payload(results, dry_run=False)["embeds"][0]["description"]
+    assert "fixing cost $0.36" in desc and "fixing cost $0.07" in desc
+    assert "model use: 125,000 tokens (120,000 in, 5,000 out) · $0.43" in desc

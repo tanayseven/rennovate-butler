@@ -62,6 +62,8 @@ Set `DISCORD_WEBHOOK_URL` (a channel webhook: Edit Channel → Integrations → 
 - one alert per merged Renovate PR, once CI on `main` has run on the merge: passed ✅, failed ❌ (the fix loop starts), no CI, or didn't finish in time;
 - live alerts when `main` is already red at the start, a fix PR is opened or merged, the butler gives up, or the run crashes.
 
+Model cost is shown in the alerts: fix alerts carry the tokens (in/out) and dollar cost of that fix so far, as billed by OpenRouter, and name the Renovate PR whose merge broke `main`; merge alerts show $0, since merging never calls the model. The run summary adds the cost per repo and the total. The same numbers (`llm_calls`, `input_tokens`, `output_tokens`, `cost_usd`, `cause_pr`) are on the fix events in `butler.log.jsonl`.
+
 Messages never ping anyone, and errors never print the webhook URL. Use `assets/logo.png` as the webhook's avatar. Unset, nothing is posted.
 
 ## Development
