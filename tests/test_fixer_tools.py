@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from renovate_butler.fixer import Workspace, checks_from_workflows, run_agent
+from renovate_butler.fixer import Usage, Workspace, checks_from_workflows, run_agent
 
 
 @pytest.fixture
@@ -100,3 +100,32 @@ def test_agent_turn_limit(ws):
     client = ScriptedClient([[_call(i, "list_dir")] for i in range(3)])
     summary, _ = run_agent(client, "m", ws, "ctx", max_turns=3, log=lambda *_: None)
     assert "turn limit" in summary
+
+
+def test_usage_adds_up_openrouter_responses():
+    u = Usage()
+    u.add_response(SimpleNamespace(prompt_tokens=1000, completion_tokens=200, cost=0.0042))
+    u.add_response(SimpleNamespace(prompt_tokens=1500, completion_tokens=None))  # no cost reported
+    u.add_response(None)  # no usage at all still counts the call
+    assert (u.calls, u.input_tokens, u.output_tokens, round(u.cost_usd, 6)) == (3, 2500, 200, 0.0042)
+    assert u.fields() == {"llm_calls": 3, "input_tokens": 2500, "output_tokens": 200, "cost_usd": 0.0042}
+    assert (u + Usage(1, 10, 5, 0.01)).fields()["cost_usd"] == 0.0142
+
+
+def test_run_agent_records_usage_and_asks_openrouter_for_cost(tmp_path):
+    seen = []
+
+    class Client:
+        def __init__(self):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kw):
+            seen.append(kw)
+            msg = SimpleNamespace(content="", tool_calls=[_call(1, "finish", summary="s", explanation="e")])
+            usage = SimpleNamespace(prompt_tokens=800, completion_tokens=50, cost=0.003)
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=usage)
+
+    u = Usage()
+    run_agent(Client(), "m", Workspace(tmp_path), "ctx", max_turns=3, log=lambda *_: None, usage=u)
+    assert seen[0]["extra_body"] == {"usage": {"include": True}}
+    assert (u.calls, u.input_tokens, u.output_tokens, u.cost_usd) == (1, 800, 50, 0.003)

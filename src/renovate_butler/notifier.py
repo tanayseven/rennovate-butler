@@ -47,6 +47,23 @@ def _repo_link(repo: str) -> str:
     return f"[{repo.split('/', 1)[-1]}](https://github.com/{repo})"
 
 
+def _usage_text(input_tokens: int, output_tokens: int, cost_usd: float) -> str:
+    return f"{input_tokens + output_tokens:,} tokens ({input_tokens:,} in, {output_tokens:,} out) · ${cost_usd:.2f}"
+
+
+def _fix_cost_line(event: dict) -> str:
+    """Model usage for this fix so far, from the event's fields; empty when the event has none."""
+    if "cost_usd" not in event:
+        return ""
+    calls = event.get("llm_calls", 0)
+    line = "🪙 " + _usage_text(event.get("input_tokens", 0), event.get("output_tokens", 0), event["cost_usd"])
+    line += f" over {calls} model call{'s' if calls != 1 else ''}"
+    cause = event.get("cause_pr")
+    if cause:
+        line += f" · fixing the break from {_pr_link(event.get('repo', ''), cause)}"
+    return "\n" + line
+
+
 def run_url() -> str | None:
     """Link to the current GitHub Actions run, when running in Actions."""
     server, repo, run_id = (os.environ.get(k) for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
@@ -79,12 +96,18 @@ def summary_payload(results: Sequence[RepoResult], dry_run: bool, link: str | No
             parts.append("would merge " + ", ".join(_pr_link(r.repo, n) for n in r.would_merge))
         if r.fix_prs:
             parts.append("fix PRs " + ", ".join(_pr_link(r.repo, n) for n in r.fix_prs))
+        if r.usage.calls:
+            parts.append(f"fixing cost ${r.usage.cost_usd:.2f}")
         if not parts:
             parts.append(f"nothing to merge ({r.skipped} skipped)" if r.skipped else "no open PRs to merge")
         if not r.main_green:
             parts.append(f"**main not green**: {r.note[:MAX_NOTE] or 'see the run log'}")
         lines.append(f"**{_repo_link(r.repo)}** · " + " · ".join(parts))
     footer = f"{merged} merged · {fixes} fix PRs"
+    total_in = sum(r.usage.input_tokens for r in results)
+    total_out = sum(r.usage.output_tokens for r in results)
+    total_cost = sum(r.usage.cost_usd for r in results)
+    footer += f" · model use: {_usage_text(total_in, total_out, total_cost)}"
     if dry_run:
         footer = f"{sum(len(r.would_merge) for r in results)} would merge · dry run, nothing changed"
     if link:
@@ -109,18 +132,21 @@ def event_payload(event: dict, link: str | None = None) -> dict | None:
         if outcome not in MERGE_OUTCOMES:
             return None
         title, result, color = MERGE_OUTCOMES[outcome]
-        desc = f"{what}\n{result}"
+        desc = f"{what}\n{result}\n🪙 0 tokens · $0.00 (merging doesn't use the model)"
     elif kind == "main_red":
         if pr:
             return None  # red after a Renovate merge: already reported by that PR's merge_ci alert
         title, desc, color = "main went red", f"{_repo_link(repo)}: main is failing. Trying to fix it.", RED
     elif kind == "fix_pr":
         title, desc, color = "Fix PR opened", f"{_repo_link(repo)}: opened {pr_ref} to fix main.", AMBER
+        desc += _fix_cost_line(event)
     elif kind == "fix_merged":
         title, desc, color = "Fix merged", f"{_repo_link(repo)}: merged {pr_ref}. Watching main.", GREEN
+        desc += _fix_cost_line(event)
     elif kind == "fix_gave_up":
         where = f" Last fix PR: {pr_ref}." if pr else ""
         title, desc, color = "Needs a human", f"{_repo_link(repo)}: {event.get('msg', '').strip()}.{where}", RED
+        desc += _fix_cost_line(event)
     else:
         return None
     if link:

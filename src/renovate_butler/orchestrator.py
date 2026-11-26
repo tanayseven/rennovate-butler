@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import scanner
 from .config import Config
-from .fixer import Fixer
+from .fixer import Fixer, Usage
 from .github_client import Forge, PRInfo
 from .watcher import wait_for_ci
 
@@ -65,6 +65,7 @@ class RepoResult:
     fix_prs: list[int] = field(default_factory=list)
     main_green: bool = False
     note: str = ""
+    usage: Usage = field(default_factory=Usage)  # model usage of every fix attempt in this repo
 
 
 class Butler:
@@ -161,7 +162,7 @@ class Butler:
                 self.log(
                     f"  {main} went red after #{pr.number}", event="main_red", repo=repo, sha=merge_sha, pr=pr.number
                 )
-                if not self.heal(repo, res):
+                if not self.heal(repo, res, cause_pr=pr.number):
                     return res
 
         res.main_green = True
@@ -170,7 +171,12 @@ class Butler:
 
     # ------------------------------------------------------------------ healing
 
-    def heal(self, repo: str, res: RepoResult) -> bool:
+    def heal(self, repo: str, res: RepoResult, cause_pr: int | None = None) -> bool:
+        """Fix a red main. `cause_pr` is the Renovate PR whose merge turned it red, if any.
+
+        Every fix event carries the model usage of this incident so far (all attempts),
+        so alerts and the event log can show tokens and cost per fix.
+        """
         main = self.cfg.main_branch
         if self.cfg.dry_run:
             self.log("  [dry-run] would ask the fixer for a fix PR", event="dry_fix", repo=repo)
@@ -183,6 +189,11 @@ class Butler:
         red_sha = self.forge.branch_head(repo, main)
         fix_pr: PRInfo | None = None
         branch = ""
+        spent = Usage()
+
+        def cost() -> dict:
+            return {**spent.fields(), "cause_pr": cause_pr}
+
         history: list[str] = []
 
         for attempt in range(1, self.cfg.fix.max_attempts + 1):
@@ -198,9 +209,16 @@ class Butler:
                 attempt=attempt,
             )
             result = self.fixer.fix(repo, main, branch, fix_pr is not None, context, workflows)
+            spent = spent + result.usage
+            res.usage = res.usage + result.usage
+            u = result.usage
+            self.log(
+                f"  attempt {attempt} used {u.input_tokens + u.output_tokens:,} tokens "
+                f"({u.input_tokens:,} in, {u.output_tokens:,} out), ${u.cost_usd:.4f}"
+            )
             if not result.changed:
                 history.append(f"Attempt {attempt}: the agent made no changes ({result.summary}).")
-                self.log(f"  attempt {attempt}: no changes produced", event="fix_empty", repo=repo)
+                self.log(f"  attempt {attempt}: no changes produced", event="fix_empty", repo=repo, **cost())
                 continue
 
             if fix_pr is None:
@@ -218,6 +236,7 @@ class Butler:
                     repo=repo,
                     pr=fix_pr.number,
                     url=fix_pr.url,
+                    **cost(),
                 )
             fix_pr = self._refresh_after_push(repo, fix_pr, target)
 
@@ -227,7 +246,7 @@ class Butler:
                 return False
             if outcome == "red":
                 history.append(f"Attempt {attempt}: pushed '{result.summary}' but the PR's CI still failed.")
-                self.log(f"  fix PR #{fix_pr.number} CI is red", event="fix_red", repo=repo, pr=fix_pr.number)
+                self.log(f"  fix PR #{fix_pr.number} CI is red", event="fix_red", repo=repo, pr=fix_pr.number, **cost())
                 continue
 
             fix_pr = self._wait_mergeable(repo, fix_pr)
@@ -241,6 +260,7 @@ class Butler:
                 repo=repo,
                 pr=fix_pr.number,
                 sha=merge_sha,
+                **cost(),
             )
             main_outcome = self._wait(repo, merge_sha)
             if main_outcome in ("green", "no-ci"):
@@ -259,6 +279,7 @@ class Butler:
             repo=repo,
             pr=fix_pr.number if fix_pr else None,
             url=fix_pr.url if fix_pr else None,
+            **cost(),
         )
         if fix_pr:
             self.forge.comment(
