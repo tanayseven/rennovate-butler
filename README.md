@@ -2,6 +2,28 @@
 
 Merges green, high-confidence Renovate PRs one at a time, watches `main` after each merge, and if `main` goes red, asks Claude Sonnet 5.5 (via OpenRouter) for a fix PR — retrying until `main` is green or the attempt cap is hit.
 
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org)
+[![uv](https://img.shields.io/badge/uv-0.11.30-DE5FE9?style=flat&logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
+[![mise](https://img.shields.io/badge/mise-managed-1E1E2E?style=flat)](https://mise.jdx.dev)
+[![Ruff](https://img.shields.io/badge/lint-Ruff-D7FF64?style=flat&logo=ruff&logoColor=black)](https://docs.astral.sh/ruff/)
+[![pytest](https://img.shields.io/badge/tests-pytest-0A9EDC?style=flat&logo=pytest&logoColor=white)](https://docs.pytest.org)
+[![PyGithub](https://img.shields.io/badge/PyGithub-2.10-181717?style=flat&logo=github&logoColor=white)](https://pygithub.readthedocs.io)
+[![Claude Sonnet 5.5](https://img.shields.io/badge/Claude-Sonnet%205.5-D97757?style=flat&logo=claude&logoColor=white)](https://www.anthropic.com/claude)
+[![OpenRouter](https://img.shields.io/badge/via-OpenRouter-6566F1?style=flat)](https://openrouter.ai)
+[![Discord](https://img.shields.io/badge/alerts-Discord-5865F2?style=flat&logo=discord&logoColor=white)](#discord)
+
+[![renovate-butler](https://github.com/tanayseven/rennovate-butler/actions/workflows/renovate-butler.yml/badge.svg)](https://github.com/tanayseven/rennovate-butler/actions/workflows/renovate-butler.yml)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?style=flat&logo=githubactions&logoColor=white)](https://github.com/tanayseven/rennovate-butler/actions/workflows/renovate-butler.yml)
+[![Schedule](https://img.shields.io/badge/runs-daily%2020%3A00%20IST-2088FF?style=flat&logo=clockify&logoColor=white)](.github/workflows/renovate-butler.yml)
+
+[![Renovate](https://img.shields.io/badge/Renovate-Mend-1A1F6C?style=flat&logo=renovate&logoColor=white)](https://developer.mend.io/github/tanayseven)
+[![Merge Confidence](https://img.shields.io/badge/Merge%20Confidence-gated-2EA44F?style=flat)](#how-decisions-are-made)
+
+## Renovate links
+
+- [Mend developer portal for tanayseven](https://developer.mend.io/github/tanayseven): every repo's Renovate status, job logs and problems (e.g. "Unexpected downgrade detected").
+- [Mend Renovate app installation](https://github.com/apps/renovate/installations/new): choose which repos Renovate can access.
+
 ## Setup
 
 ```sh
@@ -24,7 +46,7 @@ Exit code is non-zero if any repo's `main` is not green at the end. Every action
 
 ## Adding a repo
 
-1. Add the repo to the [Mend Renovate GitHub app](https://github.com/apps/renovate/installations/new) (pick your account, then add the repo under **Repository access**) and merge the onboarding PR Renovate opens there. The [Mend developer portal](https://developer.mend.io/) shows each repo's Renovate status and logs.
+1. Add the repo to the [Mend Renovate GitHub app](https://github.com/apps/renovate/installations/new) (pick your account, then add the repo under **Repository access**) and merge the onboarding PR Renovate opens there. The [Mend developer portal](https://developer.mend.io/github/tanayseven) shows each repo's Renovate status and logs.
 2. Make sure the `BUTLER_GITHUB_TOKEN` PAT can reach the repo. A fine-grained PAT has to list it.
 3. Add it to `butler.yaml` with [`scripts/add_repo.py`](scripts/add_repo.py):
 
