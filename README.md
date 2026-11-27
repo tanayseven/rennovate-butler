@@ -2,6 +2,11 @@
 
 Merges green, high-confidence Renovate PRs one at a time, watches `main` after each merge, and if `main` goes red, asks Claude Sonnet 5.5 (via OpenRouter) for a fix PR — retrying until `main` is green or the attempt cap is hit.
 
+## Renovate links
+
+- [Mend developer portal for tanayseven](https://developer.mend.io/github/tanayseven): every repo's Renovate status, job logs and problems (e.g. "Unexpected downgrade detected").
+- [Mend Renovate app installation](https://github.com/apps/renovate/installations/new): choose which repos Renovate can access.
+
 ## Setup
 
 ```sh
@@ -24,7 +29,7 @@ Exit code is non-zero if any repo's `main` is not green at the end. Every action
 
 ## Adding a repo
 
-1. Add the repo to the [Mend Renovate GitHub app](https://github.com/apps/renovate/installations/new) (pick your account, then add the repo under **Repository access**) and merge the onboarding PR Renovate opens there. The [Mend developer portal](https://developer.mend.io/) shows each repo's Renovate status and logs.
+1. Add the repo to the [Mend Renovate GitHub app](https://github.com/apps/renovate/installations/new) (pick your account, then add the repo under **Repository access**) and merge the onboarding PR Renovate opens there. The [Mend developer portal](https://developer.mend.io/github/tanayseven) shows each repo's Renovate status and logs.
 2. Make sure the `BUTLER_GITHUB_TOKEN` PAT can reach the repo. A fine-grained PAT has to list it.
 3. Add it to `butler.yaml` with [`scripts/add_repo.py`](scripts/add_repo.py):
 
