@@ -2,7 +2,7 @@ name: renovate-butler
 
 on:
   schedule:
-    - cron: "30 14 * * *" # daily, 14:30 UTC = 20:00 IST (off the hour: top-of-hour schedules get dropped)
+    - cron: "30 13 * * *" # daily, 13:30 UTC = 19:00 IST (off the hour: top-of-hour schedules get dropped)
   # PRs that change the repo list (e.g. from scripts/add_repo.py) get a dry run as their check.
   pull_request:
     paths: [butler.yaml, .github/workflows/renovate-butler.yml]

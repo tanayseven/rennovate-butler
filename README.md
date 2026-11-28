@@ -14,7 +14,7 @@ Merges green, high-confidence Renovate PRs one at a time, watches `main` after e
 
 [![renovate-butler](https://github.com/tanayseven/rennovate-butler/actions/workflows/renovate-butler.yml/badge.svg)](https://github.com/tanayseven/rennovate-butler/actions/workflows/renovate-butler.yml)
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?style=flat&logo=githubactions&logoColor=white)](https://github.com/tanayseven/rennovate-butler/actions/workflows/renovate-butler.yml)
-[![Schedule](https://img.shields.io/badge/runs-daily%2020%3A00%20IST-2088FF?style=flat&logo=clockify&logoColor=white)](.github/workflows/renovate-butler.yml)
+[![Schedule](https://img.shields.io/badge/runs-daily%2019%3A00%20IST-2088FF?style=flat&logo=clockify&logoColor=white)](.github/workflows/renovate-butler.yml)
 
 [![Renovate](https://img.shields.io/badge/Renovate-Mend-1A1F6C?style=flat&logo=renovate&logoColor=white)](https://developer.mend.io/github/tanayseven)
 [![Merge Confidence](https://img.shields.io/badge/Merge%20Confidence-gated-2EA44F?style=flat)](#how-decisions-are-made)
