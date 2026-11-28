@@ -76,6 +76,18 @@ def evaluate(
     return v(True, "ok", level, types)
 
 
+def blocked_only_by_ci(v: Verdict, cfg: MergeConfig, fetch: Callable[[str], str] = fetch_badge) -> bool:
+    """True when `v` was skipped for failing CI and would merge if CI were green.
+
+    Those are the PRs worth re-running and, failing that, repairing. A PR skipped for its
+    author, a label, conflicts or an update type the config doesn't allow is left alone.
+    GitHub's mergeability isn't held against it: it is checked again before merging."""
+    if v.ci != "failing":
+        return False
+    green = evaluate(v.pr, "passing", cfg, fetch)
+    return green.merge or green.reason.startswith("mergeable_state=unknown")
+
+
 def scan(forge: Forge, repo: str, cfg: MergeConfig, fetch: Callable[[str], str] = fetch_badge) -> list[Verdict]:
     out = []
     for pr in forge.open_prs(repo):

@@ -62,6 +62,8 @@ class FakeForge:
         self.comments: list[tuple[int, str]] = []
         self.merge_count = 0
         self.next_pr = 900
+        self.reruns: list[str] = []  # head SHAs whose failed jobs were re-run
+        self.rerunnable = True  # False: the failures were already re-run once
 
     def set_ci(self, sha: str, *states: str) -> None:
         self.ci[sha] = list(states)
@@ -88,6 +90,12 @@ class FakeForge:
 
     def failed_runs(self, repo, sha):
         return [FailedRun(1, "CI", "https://example/run/1", ".github/workflows/ci.yml")]
+
+    def rerun_failed(self, repo, sha):
+        if not self.rerunnable or sha in self.reruns:
+            return []
+        self.reruns.append(sha)
+        return [1]
 
     def run_logs(self, repo, run_id):
         return "E   AssertionError: boom"

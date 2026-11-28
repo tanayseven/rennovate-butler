@@ -49,3 +49,49 @@ def test_rerun_supersedes_earlier_run_of_same_name():
 
 def test_dependency_graph_runs_are_ignored():
     assert ignored_suites([run("dynamic", 7), run("push", 8)]) == {7}
+
+
+def test_waits_for_github_to_compute_mergeability(monkeypatch):
+    # diwali 2026-11-27: the first read of a green PR said mergeable_state=unknown, the next
+    # one seconds later said clean, and the butler had skipped the PR on the first answer.
+    from renovate_butler import github_client
+
+    monkeypatch.setattr(github_client.time, "sleep", lambda s: None)
+    answers = iter([(None, "unknown"), (True, "unknown"), (True, "clean")])
+    reads = []
+
+    class Repo:
+        def get_pull(self, number):
+            mergeable, state = next(answers)
+            reads.append(number)
+            return SimpleNamespace(mergeable=mergeable, mergeable_state=state)
+
+    pr = github_client.GitHubClient._settled_pull(Repo(), 7)
+    assert (pr.mergeable, pr.mergeable_state) == (True, "clean")
+    assert reads == [7, 7, 7]
+
+
+def test_reruns_only_first_attempts_of_failed_push_and_pr_runs():
+    from renovate_butler.github_client import GitHubClient
+
+    def wr(id, event="pull_request", conclusion="failure", attempt=1, status="completed"):
+        return SimpleNamespace(
+            id=id,
+            event=event,
+            conclusion=conclusion,
+            run_attempt=attempt,
+            status=status,
+            rerun_failed_jobs=lambda: True,
+        )
+
+    runs = [
+        wr(1),
+        wr(2, attempt=2),
+        wr(3, conclusion="success"),
+        wr(4, event="schedule"),
+        wr(5, status="in_progress"),
+        wr(6, conclusion="cancelled"),
+    ]
+    client = GitHubClient.__new__(GitHubClient)
+    client._repo = lambda repo: SimpleNamespace(get_workflow_runs=lambda head_sha: runs)
+    assert client.rerun_failed("o/r", "sha") == [1, 6]

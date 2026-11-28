@@ -1,6 +1,6 @@
 # renovate-butler
 
-Merges green, high-confidence Renovate PRs one at a time, watches `main` after each merge, and if `main` goes red, asks Claude Sonnet 5.5 (via OpenRouter) for a fix PR — retrying until `main` is green or the attempt cap is hit.
+Merges green, high-confidence Renovate PRs one at a time, watches `main` after each merge, and if `main` goes red, asks Claude Sonnet 5.5 (via OpenRouter) for a fix PR — retrying until `main` is green or the attempt cap is hit. Renovate PRs whose own CI is red get their failed jobs re-run once, and if they are still red, the same agent repairs them on their own branch before they are merged.
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org)
 [![uv](https://img.shields.io/badge/uv-0.11.30-DE5FE9?style=flat&logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
@@ -68,6 +68,8 @@ A PR is merged only if **all** hold:
 - every update's semver bump (from the badge's from/to versions; 0.x minor counts as major) is in `allowed_update_types`;
 - GitHub reports it mergeable (`clean`/`unstable`/`has_hooks`).
 
+GitHub works out mergeability lazily: the first read of a PR it hasn't checked recently answers `unknown` and starts the check. The butler re-reads each PR for a few seconds until it has an answer.
+
 Mend only publishes Merge Confidence for package registries, so PRs for GitHub Actions, tools in `mise.toml`, Docker images and lock file maintenance carry no badge. For those, the butler reads the update type from the table Renovate puts at the top of the PR (`| Package | Type | Update | Change |`) and merges only if it is in `merge.badgeless_update_types` (here: patch, minor and `lockFileMaintenance`). A 0.x minor bump still counts as major. Every other rule above, green CI included, still applies. With `badgeless_update_types: []`, badge-less PRs are skipped.
 
 Confidence badges are images (the word is rendered into a PNG), so `confidence.py` decodes the PNG and classifies by background colour (red=low, grey=neutral, green=high) and badge width (very high is wider).
@@ -76,13 +78,23 @@ Confidence badges are images (the word is rendered into a PNG), so `confidence.p
 
 When `main` is red: collect the failing jobs' logs, the workflow YAML and the last commit's diff, then run a tool-use agent on a temporary clone. The agent has `list_dir`, `read_file`, `grep`, `apply_edit`, `write_file` and `finish`, all confined to the clone, plus `run_check` if `fix.allow_local_checks` is true (runs the workflow's own `run:` steps, minus any touching secrets, with secret-looking env vars stripped). The change is pushed to `butler/fix-main-<sha>-<ts>` and opened as a PR. If its CI fails, the next attempt continues on the same branch with the new logs. When green it is merged and `main` is watched again.
 
+## Red Renovate PRs
+
+A Renovate PR held back **only** by failing CI (it would merge if CI were green) is not just skipped:
+
+1. **Re-run once.** Before merging the green PRs, the butler re-runs the failed jobs of the PR's failed GitHub Actions runs (`push`/`pull_request`, not scheduled or manual ones). Only first attempts are re-run, so each failure is retried once, even across butler runs. Flaky tests usually pass here.
+2. **Repair.** After the green PRs are merged, it waits for the re-runs. If CI is still red (or the failure was already re-run), the healing agent gets the PR's failing logs, workflows, latest commit and description, and pushes a `fix(deps): …` commit to the Renovate branch itself. It retries up to `fix.max_attempts`, then gives up and alerts. Renovate stops rebasing a branch someone else has pushed to, which is fine for a PR that's about to be merged.
+3. **Merge.** Once green, the PR goes through the same checks as any other and is merged, and `main` is watched as usual.
+
+PRs skipped for any other reason (author, label, conflicts, confidence, update type) are left alone. A dry run only reports what it would do.
+
 ## Discord
 
 Set `DISCORD_WEBHOOK_URL` (a channel webhook: Edit Channel → Integrations → Webhooks) and the butler posts:
 
 - a summary after every run (green when every repo's `main` is green, red otherwise);
 - one alert per merged Renovate PR, once CI on `main` has run on the merge: passed ✅, failed ❌ (the fix loop starts), no CI, or didn't finish in time;
-- live alerts when `main` is already red at the start, a fix PR is opened or merged, the butler gives up, or the run crashes.
+- live alerts when `main` is already red at the start, a fix PR is opened or merged, a red Renovate PR is repaired or given up on, the butler gives up, or the run crashes.
 
 Model cost is shown in the alerts: fix alerts carry the tokens (in/out) and dollar cost of that fix so far, as billed by OpenRouter, and name the Renovate PR whose merge broke `main`; merge alerts show $0, since merging never calls the model. The run summary adds the cost per repo and the total. The same numbers (`llm_calls`, `input_tokens`, `output_tokens`, `cost_usd`, `cause_pr`) are on the fix events in `butler.log.jsonl`.
 

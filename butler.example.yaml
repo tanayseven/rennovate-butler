@@ -7,7 +7,7 @@ merge:
   method: squash                 # merge | squash | rebase
   authors: ["renovate[bot]", "app/renovate"]
   min_confidence: high           # low | neutral | high | very high
-  allowed_update_types: [patch, minor]
+  allowed_update_types: [patch, minor]   # add major to merge major upgrades too
   # PRs without a Merge Confidence badge (Actions, mise tools, Docker, lock files): judged by
   # Renovate's update type instead. 0.x minor bumps count as major. [] = never merge them.
   badgeless_update_types: [patch, minor, lockFileMaintenance]
@@ -15,7 +15,7 @@ merge:
 
 fix:
   model: anthropic/claude-sonnet-5.5   # OpenRouter model id; checked at startup
-  max_attempts: 3                      # fix attempts per red-main incident
+  max_attempts: 3                      # fix attempts per red-main incident, and per red Renovate PR
   max_tool_turns: 40
   allow_local_checks: false            # true = model may run the workflow's run: steps locally
   label: renovate-butler

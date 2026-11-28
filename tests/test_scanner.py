@@ -95,3 +95,16 @@ def test_badgeless_off_by_default_and_ci_still_required():
 def test_badged_prs_still_use_confidence_rules():
     v = evaluate(make_pr(1, body=body_for("left-pad", "1.1.3", "1.1.4")), "passing", BADGELESS, HIGH)
     assert not v.merge and "confidence neutral < high" in v.reason
+
+
+def test_blocked_only_by_ci():
+    from renovate_butler.scanner import blocked_only_by_ci
+
+    def red(**kw):
+        return evaluate(make_pr(1, **kw), "failing", CFG, HIGH)
+
+    assert blocked_only_by_ci(red(), CFG, HIGH)
+    assert blocked_only_by_ci(red(mergeable=None, mergeable_state="unknown"), CFG, HIGH)
+    assert not blocked_only_by_ci(red(author="someone"), CFG, HIGH)
+    assert not blocked_only_by_ci(red(body=body_for("lodash", "3.0.0", "4.0.0")), CFG, HIGH)  # major not allowed
+    assert not blocked_only_by_ci(evaluate(make_pr(1), "pending", CFG, HIGH), CFG, HIGH)
