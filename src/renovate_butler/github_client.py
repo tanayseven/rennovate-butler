@@ -24,6 +24,8 @@ FAILED_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required", "s
 # and the fixer can't repair it. So they never count towards a commit's CI state.
 IGNORED_EVENTS = frozenset({"schedule", "workflow_dispatch", "repository_dispatch", "dynamic"})
 LOG_TAIL_LINES = 400
+MERGEABLE_RETRIES = 5
+MERGEABLE_RETRY_S = 2
 
 
 @dataclass
@@ -78,6 +80,7 @@ class Forge(Protocol):
     def branch_head(self, repo: str, branch: str) -> str: ...
     def failed_runs(self, repo: str, sha: str) -> list[FailedRun]: ...
     def run_logs(self, repo: str, run_id: int) -> str: ...
+    def rerun_failed(self, repo: str, sha: str) -> list[int]: ...
     def file_at(self, repo: str, path: str, ref: str) -> str: ...
     def commit_patch(self, repo: str, sha: str) -> tuple[str, str]: ...
     def open_pr(self, repo: str, head: str, base: str, title: str, body: str, labels: list[str]) -> PRInfo: ...
@@ -117,24 +120,29 @@ class GitHubClient:
             created_at=pr.created_at,
         )
 
+    @staticmethod
+    def _settled_pull(r, number: int):
+        """GitHub computes mergeability lazily: the first read of a PR it hasn't checked lately
+        starts the check and answers mergeable=null / mergeable_state=unknown. Re-read for a few
+        seconds until it has an answer."""
+        pr = r.get_pull(number)
+        for _ in range(MERGEABLE_RETRIES):
+            if pr.mergeable is not None and pr.mergeable_state != "unknown":
+                break
+            time.sleep(MERGEABLE_RETRY_S)
+            pr = r.get_pull(number)
+        return pr
+
     def open_prs(self, repo: str) -> list[PRInfo]:
         r = self._repo(repo)
         # The list endpoint omits mergeable; fetch each PR individually.
         return [
-            self._to_info(repo, r.get_pull(p.number))
+            self._to_info(repo, self._settled_pull(r, p.number))
             for p in r.get_pulls(state="open", sort="created", direction="asc")
         ]
 
     def get_pr(self, repo: str, number: int) -> PRInfo:
-        r = self._repo(repo)
-        pr = r.get_pull(number)
-        # GitHub computes mergeability lazily; give it a few seconds.
-        for _ in range(5):
-            if pr.mergeable is not None:
-                break
-            time.sleep(2)
-            pr = r.get_pull(number)
-        return self._to_info(repo, pr)
+        return self._to_info(repo, self._settled_pull(self._repo(repo), number))
 
     def ci_state(self, repo: str, sha: str) -> CIState:
         r = self._repo(repo)
@@ -177,6 +185,19 @@ class GitHubClient:
             if run.status == "completed" and run.conclusion in FAILED_CONCLUSIONS:
                 out.append(FailedRun(run.id, run.name or "", run.html_url, run.path or ""))
         return out
+
+    def rerun_failed(self, repo: str, sha: str) -> list[int]:
+        """Re-run the failed jobs of every failed workflow run on `sha` that hasn't been re-run yet.
+
+        Only first attempts are re-run, so a failure gets exactly one retry, even across butler
+        runs. Returns the ids of the runs that were re-run (empty: nothing left to retry)."""
+        rerun = []
+        for run in self._repo(repo).get_workflow_runs(head_sha=sha):
+            if run.event in IGNORED_EVENTS or run.status != "completed":
+                continue
+            if run.conclusion in FAILED_CONCLUSIONS and run.run_attempt == 1 and run.rerun_failed_jobs():
+                rerun.append(run.id)
+        return rerun
 
     def run_logs(self, repo: str, run_id: int) -> str:
         run = self._repo(repo).get_workflow_run(run_id)

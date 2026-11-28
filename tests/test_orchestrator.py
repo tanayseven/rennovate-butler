@@ -199,3 +199,91 @@ def test_fix_usage_accumulates_per_incident_and_is_attributed_to_the_merge(no_sl
     assert (gave_up["llm_calls"], gave_up["input_tokens"], gave_up["output_tokens"]) == (10, 20_000, 1_000)
     assert gave_up["cost_usd"] == 0.08
     assert (res.usage.calls, round(res.usage.cost_usd, 2)) == (10, 0.08)
+
+
+# ---------------------------------------------------------------- red Renovate PRs
+
+
+def red_pr(number: int, **kw):
+    return make_pr(number, head_sha=f"renovate/{number}@1", head_ref=f"renovate/{number}", **kw)
+
+
+def test_flaky_pr_is_rerun_once_and_merged_when_green(no_sleep):
+    forge = FakeForge([red_pr(1)])
+    forge.set_ci("renovate/1@1", "failing", "failing", "pending", "passing")  # scan, old run, re-run, green
+    fixer = FakeFixer(forge)
+    res = butler(forge, fixer, cfg(), no_sleep).process_repo("o/r")
+    assert forge.reruns == ["renovate/1@1"]
+    assert forge.merged == [1]
+    assert fixer.calls == []  # green after the re-run: no repair needed
+    assert res.main_green and res.skipped == 0
+
+
+def test_pr_still_red_after_rerun_is_repaired_on_its_own_branch_then_merged(no_sleep):
+    forge = FakeForge([red_pr(1)])
+    forge.set_ci("renovate/1@1", "failing", "pending", "failing")
+    fixer = FakeFixer(forge)
+    res = butler(forge, fixer, cfg(), no_sleep).process_repo("o/r")
+    assert forge.reruns == ["renovate/1@1"]
+    assert [(c["branch"], c["continue"]) for c in fixer.calls] == [("renovate/1", True)]
+    assert "dependency-update PR #1" in fixer.calls[0]["context"]
+    assert "AssertionError: boom" in fixer.calls[0]["context"]
+    assert forge.merged == [1] and forge.prs[1].head_sha == "renovate/1@2"
+    assert forge.opened == []  # the fix goes on the Renovate PR, not a new PR
+    assert res.main_green and res.skipped == 0
+
+
+def test_already_rerun_pr_goes_straight_to_repair(no_sleep):
+    forge = FakeForge([red_pr(1)])
+    forge.rerunnable = False
+    forge.set_ci("renovate/1@1", "failing")
+    fixer = FakeFixer(forge)
+    butler(forge, fixer, cfg(), no_sleep).process_repo("o/r")
+    assert forge.reruns == []
+    assert len(fixer.calls) == 1 and forge.merged == [1]
+
+
+def test_repair_gives_up_and_leaves_pr_unmerged(no_sleep):
+    forge = FakeForge([red_pr(1), make_pr(2)])
+    forge.ci_state = lambda repo, sha: "failing" if sha.startswith("renovate/1@") else "passing"
+    fixer = FakeFixer(forge)
+    events = []
+    sleep, now = no_sleep
+    c = cfg()
+    c.fix.max_attempts = 2
+    b = Butler(forge, fixer, c, log=lambda m, **e: events.append(e), sleep=sleep, now=now, fetch=FETCH)
+    res = b.process_repo("o/r")
+    assert forge.merged == [2]
+    assert len(fixer.calls) == 2
+    assert "Previous attempts" in fixer.calls[1]["context"]
+    assert res.main_green and res.skipped == 1
+    assert any(e.get("event") == "pr_fix_gave_up" and e["pr"] == 1 for e in events)
+
+
+def test_red_pr_skipped_for_another_reason_is_not_rerun_or_repaired(no_sleep):
+    forge = FakeForge([red_pr(1, labels=["do-not-merge"]), red_pr(2, author="someone")])
+    forge.set_ci("renovate/1@1", "failing")
+    forge.set_ci("renovate/2@1", "failing")
+    fixer = FakeFixer(forge)
+    res = butler(forge, fixer, cfg(), no_sleep).process_repo("o/r")
+    assert forge.reruns == [] and fixer.calls == [] and forge.merged == []
+    assert res.main_green and res.skipped == 2
+
+
+def test_dry_run_neither_reruns_nor_repairs(no_sleep):
+    forge = FakeForge([red_pr(1)])
+    forge.set_ci("renovate/1@1", "failing")
+    fixer = FakeFixer(forge)
+    res = butler(forge, fixer, cfg(dry_run=True), no_sleep).process_repo("o/r")
+    assert forge.reruns == [] and fixer.calls == [] and forge.merged == []
+    assert res.skipped == 1
+
+
+def test_major_update_merges_when_allowed(no_sleep):
+    from .conftest import body_for
+
+    forge = FakeForge([make_pr(1, body=body_for("lodash", "3.0.0", "4.0.0"))])
+    c = cfg()
+    c.merge.allowed_update_types = ["patch", "minor", "major"]
+    butler(forge, None, c, no_sleep).process_repo("o/r")
+    assert forge.merged == [1]

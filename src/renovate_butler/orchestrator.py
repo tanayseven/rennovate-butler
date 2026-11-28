@@ -120,54 +120,195 @@ class Butler:
         self.log(scanner.format_report(verdicts))
         res.skipped = sum(not v.merge for v in verdicts)
 
+        # Renovate PRs held back only by red CI: re-run their failed jobs now, so the retries
+        # run while the green PRs are merged, then come back to them.
+        red = [v.pr for v in verdicts if scanner.blocked_only_by_ci(v, self.cfg.merge, self.fetch)]
+        rerun = {pr.number: self._rerun(repo, pr) for pr in red}
+
         for v in verdicts:
-            if not v.merge:
-                continue
-            # Re-check: earlier merges may have changed this PR's state.
-            pr = self.forge.get_pr(repo, v.pr.number)
-            fresh = scanner.evaluate(pr, self.forge.ci_state(repo, pr.head_sha), self.cfg.merge, self.fetch)
-            if not fresh.merge:
-                res.skipped += 1
-                self.log(f"  #{pr.number}: no longer mergeable ({fresh.reason})", event="skip", repo=repo, pr=pr.number)
-                continue
-            if self.cfg.dry_run:
-                res.would_merge.append(pr.number)
-                self.log(f"  [dry-run] would merge #{pr.number} {pr.title}", event="dry_merge", repo=repo, pr=pr.number)
-                continue
-            merge_sha = self.forge.merge(repo, pr.number, self.cfg.merge.method, pr.head_sha)
-            res.merged.append(pr.number)
-            self.log(
-                f"  merged #{pr.number} ({fresh.confidence}, {','.join(sorted(fresh.update_types))}) -> {merge_sha[:7]}",
-                event="merged",
-                repo=repo,
-                pr=pr.number,
-                sha=merge_sha,
-                confidence=fresh.confidence,
-            )
-            outcome = self._wait(repo, merge_sha)
-            self.log(
-                f"  {main} CI after #{pr.number}: {outcome}",
-                event="merge_ci",
-                repo=repo,
-                pr=pr.number,
-                sha=merge_sha,
-                outcome=outcome,
-                title=pr.title,
-            )
-            if outcome == "timeout":
-                res.note = f"main CI did not settle after merging #{pr.number}; stopping"
-                self.log(f"  {res.note}", event="main_timeout", repo=repo, sha=merge_sha)
+            if v.merge and not self._merge(repo, v.pr.number, res):
                 return res
-            if outcome == "red":
-                self.log(
-                    f"  {main} went red after #{pr.number}", event="main_red", repo=repo, sha=merge_sha, pr=pr.number
-                )
-                if not self.heal(repo, res, cause_pr=pr.number):
-                    return res
+
+        for pr in red:
+            res.skipped -= 1  # counted as skipped by the scan; _merge / _repair recount if needed
+            if not self._retry_or_repair(repo, pr, rerun[pr.number], res):
+                return res
 
         res.main_green = True
         self.log(f"  {main} is green", event="main_green", repo=repo)
         return res
+
+    # ------------------------------------------------------------------ merging
+
+    def _merge(self, repo: str, number: int, res: RepoResult) -> bool:
+        """Re-check one PR and merge it, then watch main. False: stop processing this repo."""
+        main = self.cfg.main_branch
+        # Re-check: earlier merges may have changed this PR's state.
+        pr = self.forge.get_pr(repo, number)
+        fresh = scanner.evaluate(pr, self.forge.ci_state(repo, pr.head_sha), self.cfg.merge, self.fetch)
+        if not fresh.merge:
+            res.skipped += 1
+            self.log(f"  #{pr.number}: no longer mergeable ({fresh.reason})", event="skip", repo=repo, pr=pr.number)
+            return True
+        if self.cfg.dry_run:
+            res.would_merge.append(pr.number)
+            self.log(f"  [dry-run] would merge #{pr.number} {pr.title}", event="dry_merge", repo=repo, pr=pr.number)
+            return True
+        merge_sha = self.forge.merge(repo, pr.number, self.cfg.merge.method, pr.head_sha)
+        res.merged.append(pr.number)
+        self.log(
+            f"  merged #{pr.number} ({fresh.confidence}, {','.join(sorted(fresh.update_types))}) -> {merge_sha[:7]}",
+            event="merged",
+            repo=repo,
+            pr=pr.number,
+            sha=merge_sha,
+            confidence=fresh.confidence,
+        )
+        outcome = self._wait(repo, merge_sha)
+        self.log(
+            f"  {main} CI after #{pr.number}: {outcome}",
+            event="merge_ci",
+            repo=repo,
+            pr=pr.number,
+            sha=merge_sha,
+            outcome=outcome,
+            title=pr.title,
+        )
+        if outcome == "timeout":
+            res.note = f"main CI did not settle after merging #{pr.number}; stopping"
+            self.log(f"  {res.note}", event="main_timeout", repo=repo, sha=merge_sha)
+            return False
+        if outcome == "red":
+            self.log(f"  {main} went red after #{pr.number}", event="main_red", repo=repo, sha=merge_sha, pr=pr.number)
+            return self.heal(repo, res, cause_pr=pr.number)
+        return True
+
+    # ------------------------------------------------------------------ red Renovate PRs
+
+    def _rerun(self, repo: str, pr: PRInfo) -> bool:
+        """Re-run a red PR's failed jobs once. True if anything was re-run."""
+        if self.cfg.dry_run:
+            self.log(
+                f"  [dry-run] would re-run failed checks of #{pr.number}", event="dry_rerun", repo=repo, pr=pr.number
+            )
+            return False
+        runs = self.forge.rerun_failed(repo, pr.head_sha)
+        if runs:
+            self.log(
+                f"  #{pr.number}: CI failing; re-running failed jobs of {len(runs)} workflow run(s)",
+                event="rerun",
+                repo=repo,
+                pr=pr.number,
+                runs=runs,
+            )
+        else:
+            self.log(f"  #{pr.number}: CI failing and already re-run once", event="rerun_none", repo=repo, pr=pr.number)
+        return bool(runs)
+
+    def _wait_rerun(self, repo: str, sha: str):
+        """Wait for re-run jobs. Right after the request the old failed runs are still the newest,
+        so 'failing' only counts once the re-runs have shown up (or never did, within the grace)."""
+        start = self.now()
+        while self.forge.ci_state(repo, sha) == "failing" and self.now() - start < self.cfg.poll.no_ci_grace_s:
+            self.sleep(self.cfg.poll.interval_s)
+        return self._wait(repo, sha)
+
+    def _retry_or_repair(self, repo: str, pr: PRInfo, was_rerun: bool, res: RepoResult) -> bool:
+        """A Renovate PR blocked only by red CI: merge it if the re-run went green, else repair it.
+        False: stop processing this repo."""
+        if self.cfg.dry_run:
+            self.log(
+                f"  [dry-run] would repair #{pr.number} if it stays red", event="dry_repair", repo=repo, pr=pr.number
+            )
+            res.skipped += 1
+            return True
+        if was_rerun:
+            outcome = self._wait_rerun(repo, pr.head_sha)
+            self.log(
+                f"  #{pr.number} CI after re-run: {outcome}", event="rerun_ci", repo=repo, pr=pr.number, outcome=outcome
+            )
+            if outcome == "green":
+                return self._merge(repo, pr.number, res)
+            if outcome == "timeout":
+                res.skipped += 1
+                return True
+        if not self._repair(repo, pr, res):
+            res.skipped += 1
+            return True
+        return self._merge(repo, pr.number, res)
+
+    def _repair(self, repo: str, pr: PRInfo, res: RepoResult) -> bool:
+        """Have the fixer push commits to a red Renovate PR's own branch until its CI is green.
+        True when it is green and ready to merge."""
+        if self.fixer is None:
+            self.log(f"  #{pr.number}: CI red and no fixer configured", event="pr_fix_skipped", repo=repo, pr=pr.number)
+            return False
+        spent = Usage()
+        history: list[str] = []
+        for attempt in range(1, self.cfg.fix.max_attempts + 1):
+            pr = self.forge.get_pr(repo, pr.number)
+            self.log(
+                f"  repairing #{pr.number}: attempt {attempt}/{self.cfg.fix.max_attempts} on {pr.head_ref}",
+                event="pr_fix_attempt",
+                repo=repo,
+                pr=pr.number,
+                attempt=attempt,
+            )
+            context, workflows = self._pr_context(repo, pr, history)
+            result = self.fixer.fix(repo, pr.base_ref, pr.head_ref, True, context, workflows)
+            spent = spent + result.usage
+            res.usage = res.usage + result.usage
+            if not result.changed:
+                history.append(f"Attempt {attempt}: the agent made no changes ({result.summary}).")
+                continue
+            pr = self._refresh_after_push(repo, pr, pr.head_sha)
+            outcome = self._wait(repo, pr.head_sha)
+            if outcome == "green":
+                self.log(
+                    f"  repaired #{pr.number}: {result.summary}",
+                    event="pr_fixed",
+                    repo=repo,
+                    pr=pr.number,
+                    url=pr.url,
+                    **spent.fields(),
+                )
+                return True
+            if outcome == "timeout":
+                break
+            history.append(f"Attempt {attempt}: pushed '{result.summary}' but the PR's CI still failed.")
+        self.log(
+            f"  gave up repairing #{pr.number} after {self.cfg.fix.max_attempts} attempts",
+            event="pr_fix_gave_up",
+            repo=repo,
+            pr=pr.number,
+            url=pr.url,
+            **spent.fields(),
+        )
+        return False
+
+    def _pr_context(self, repo: str, pr: PRInfo, history: list[str]) -> tuple[str, list[str]]:
+        runs = self.forge.failed_runs(repo, pr.head_sha)
+        logs = "\n\n".join(f"## workflow: {r.name} ({r.url})\n{self.forge.run_logs(repo, r.run_id)}" for r in runs)
+        workflows = [
+            w for w in {self.forge.file_at(repo, r.workflow_path, pr.head_sha) for r in runs if r.workflow_path} if w
+        ]
+        message, patch = self.forge.commit_patch(repo, pr.head_sha)
+        parts = [
+            (
+                f"Repository: {repo}\nThis is the branch of dependency-update PR #{pr.number} ({pr.head_ref}, into "
+                f"{pr.base_ref}). Its CI fails. Make the update work: adapt code and config to the new version."
+            ),
+            f"PR title and description:\n<untrusted>\n{pr.title}\n\n{pr.body[:MAX_PATCH_CHARS]}\n</untrusted>",
+            f"Latest commit on the branch:\n<untrusted>\n{message}\n\n{patch[:MAX_PATCH_CHARS]}\n</untrusted>",
+            f"Failing CI logs:\n<untrusted>\n{logs[-MAX_LOG_CHARS:] or '(no logs found)'}\n</untrusted>",
+        ]
+        if workflows:
+            parts.append(
+                "Workflow definitions:\n<untrusted>\n" + "\n---\n".join(workflows)[:MAX_PATCH_CHARS] + "\n</untrusted>"
+            )
+        if history:
+            parts.append("Previous attempts:\n" + "\n".join(f"- {h}" for h in history))
+        return "\n\n".join(parts), workflows
 
     # ------------------------------------------------------------------ healing
 

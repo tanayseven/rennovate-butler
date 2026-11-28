@@ -147,6 +147,13 @@ def event_payload(event: dict, link: str | None = None) -> dict | None:
         where = f" Last fix PR: {pr_ref}." if pr else ""
         title, desc, color = "Needs a human", f"{_repo_link(repo)}: {event.get('msg', '').strip()}.{where}", RED
         desc += _fix_cost_line(event)
+    elif kind == "pr_fixed":
+        title, color = "Renovate PR repaired", GREEN
+        desc = f"{_repo_link(repo)}: pushed a fix to {pr_ref}; its CI is green. Merging it."
+        desc += _fix_cost_line(event)
+    elif kind == "pr_fix_gave_up":
+        title, desc, color = "Needs a human", f"{_repo_link(repo)}: couldn't make {pr_ref}'s CI pass.", RED
+        desc += _fix_cost_line(event)
     else:
         return None
     if link:
